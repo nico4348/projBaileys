@@ -15,16 +15,8 @@ await sendMediaImage(
 
 await sendMediaVideo(
 	{
-		video: { url: "" },
+		video: { url: url },
 		caption: "Mira este video",
-	},
-	msg.key.remoteJid!
-);
-
-await sendMediaAudio(
-	{
-		audio: { url: "./public/WhatsApp Audio 2025-05-12 at 3.56.37 PM.ogg" },
-		mimetype: "audio/ogg", // Puedes usar 'audio/ogg; codecs=opus' si quieres que sea como nota de voz
 	},
 	msg.key.remoteJid!
 );
@@ -41,6 +33,15 @@ await sendMediaDocument(
 await sendMediaSticker(
 	{
 		sticker: { url: "./public/a5536ea5-e14c-43aa-baf2-9c73332c6996.webp" },
+	},
+	msg.key.remoteJid!
+);
+
+await sendMessageWTyping(
+	{
+		audio: buffer,
+		mimetype: `${mimetype}; codecs=opus`,
+		ptt: true,
 	},
 	msg.key.remoteJid!
 );

@@ -6,6 +6,7 @@ import makeWASocket, {
 	type AnyMessageContent,
 	BinaryInfo,
 	delay,
+	makeInMemoryStore,
 	DisconnectReason,
 	downloadAndProcessHistorySyncNotification,
 	encodeWAM,
@@ -24,7 +25,12 @@ import open from "open";
 import fs from "fs";
 import P from "pino";
 import path from "path";
+import { lookup, extension } from "mime-types";
+import { stringify } from "querystring";
 
+const store = makeInMemoryStore({
+	logger: P({ level: "silent" }),
+});
 const logger = P(
 	{ timestamp: () => `,"time":"${new Date().toJSON()}"` },
 	P.destination("./wa-logs.txt")
@@ -35,6 +41,7 @@ const onDemandMap = new Map<string, string>();
 // external map to store retry counts of messages when decryption/encryption fails
 // keep this out of the socket itself, so as to prevent a message decryption/encryption loop across socket restarts
 const msgRetryCounterCache = new NodeCache();
+const groupCache = new NodeCache({});
 
 // start a connection
 const startSock = async () => {
@@ -54,6 +61,7 @@ const startSock = async () => {
 		},
 		msgRetryCounterCache,
 		generateHighQualityLinkPreview: true,
+		cachedGroupMetadata: async (jid) => groupCache.get(jid),
 		// ignore all broadcast messages -- to receive the same
 		// comment the line below out
 		// shouldIgnoreJid: jid => isJidBroadcast(jid),
@@ -61,7 +69,99 @@ const startSock = async () => {
 		getMessage,
 	});
 
-	const sendMessageWQuote = async (msg: AnyMessageContent, jid: string, quoted: any) => {
+	// } else if (msg.message?.stickerMessage) {
+	// 	console.log("[[[[EL MENSAJE ES UN STICKER]]]]");
+	// } else {
+	// 	console.log("[[[[EL MENSAJE ES UN ALGO]]]]");
+	// }
+
+	const sendMessage = async (jid: string, type: string, payload: any) => {
+		switch (type) {
+			case "text":
+				await sock.sendMessage(jid, { text: payload.text });
+				break;
+
+			case "textQuoted":
+				await sock.sendMessage(jid, { text: payload.text }, { quoted: payload.quoted });
+
+				break;
+
+			case "voiceNote":
+				await sock.sendMessage(jid, { audio: { url: payload.url }, ptt: true });
+
+				break;
+
+			case "audio":
+				await sock.sendMessage(jid, { audio: { url: payload.url } });
+
+				break;
+
+			case "video":
+				await sock.sendMessage(jid, {
+					video: { url: payload.url },
+					caption: payload.caption,
+				});
+
+				break;
+
+			case "image":
+				await sock.sendMessage(jid, {
+					image: { url: payload.url },
+					caption: payload.caption,
+				});
+
+				break;
+
+			case "document":
+				const nombreArchivo = path.basename(payload.url);
+				const tipoMime = lookup(payload.url) || "application/octet-stream";
+
+				await sock.sendMessage(jid, {
+					document: { url: payload.url },
+					fileName: nombreArchivo,
+					mimetype: tipoMime,
+				});
+
+				break;
+
+			case "reaction":
+				await sock.sendMessage(jid, {
+					react: {
+						key: payload.key,
+						text: payload.emoji,
+					},
+				});
+
+				break;
+
+			case "sticker":
+				await sock.sendMessage(jid, { sticker: payload.url });
+
+				break;
+
+			default:
+				console.log("nadaaaaaa");
+				break;
+		}
+	};
+
+	//! const saveFiles = async (url: string, name: string = Date.now().toString(), mime: string) => {
+	// 	let mimetype = mime.split("/")[1];
+	// 	if (mimetype?.includes(";")) {
+	// 		mimetype.split(";")[0];
+	// 	}
+	// 	console.log(mimetype);
+
+	// 	fs.writeFile(`${name}.${mimetype}`, url, (err) => {
+	// 		if (err) {
+	// 			console.error("Error al guardar el archivo:", err);
+	// 		} else {
+	// 			console.log("Archivo guardado correctamente.");
+	// 		}
+	// 	});
+	// };
+
+	const sendMessageWQuote = async (msg: AnyMessageContent, jid: string, quoted = undefined) => {
 		await sock.presenceSubscribe(jid);
 		await delay(500);
 
@@ -70,10 +170,10 @@ const startSock = async () => {
 
 		await sock.sendPresenceUpdate("paused", jid);
 
-		await sock.sendMessage(jid, msg, { quoted: quoted });
+		await sock.sendMessage(jid, msg, { quoted });
 	};
 
-	const sendMessageWTyping = async (msg: AnyMessageContent, jid: string) => {
+	const sendMessageWTyping = async (msg: AnyMessageContent, jid: string, quoted = undefined) => {
 		await sock.presenceSubscribe(jid);
 		await delay(500);
 
@@ -81,10 +181,14 @@ const startSock = async () => {
 		await delay(2000);
 
 		await sock.sendPresenceUpdate("paused", jid);
-
-		await sock.sendMessage(jid, msg);
+		if (quoted) {
+			await sock.sendMessage(jid, msg, { quoted });
+		} else {
+			await sock.sendMessage(jid, msg);
+		}
 	};
 
+	store.bind(sock.ev);
 	sock.ev.process(async (events) => {
 		if (events["connection.update"]) {
 			const update = events["connection.update"];
@@ -150,20 +254,15 @@ const startSock = async () => {
 				for (const msg of upsert.messages) {
 					const userJid = msg.key.participant || msg.key.remoteJid!;
 					const numero = userJid.split("@")[0];
+
 					if (!msg.key.fromMe && !isJidNewsletter(msg.key?.remoteJid!)) {
 						console.log("replying to", msg.key.remoteJid);
 						await sock!.readMessages([msg.key]);
 
-						await sendMessageWTyping(
-							{
-								audio: {
-									url: "./public/WhatsApp Audio 2025-05-12 at 3.56.37 PM.ogg",
-								},
-								mimetype: "audio/ogg; codecs=opus",
-								ptt: true,
-							},
-							msg.key.remoteJid!
-						);
+						sendMessage(msg.key.remoteJid!, "sticker", {
+							key: msg.key,
+							text: "😊",
+						});
 						// await sendMessageWQuote({ text: "Hello there!" }, msg.key.remoteJid!, msg);
 					}
 				}
