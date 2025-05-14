@@ -44,3 +44,11 @@ export const sendMessage = async (
 		console.log("nadaaaaaa");
 	}
 };
+
+/**
+ * {
+	url: "./public/photoshop_reference.pdf",
+	caption: "holisss",
+	quoted: { key: msg.key, message: msg.message },
+	}
+ */

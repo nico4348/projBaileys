@@ -11,6 +11,7 @@ export interface MediaPayload {
 	url: string;
 	caption?: string;
 	ptt?: boolean;
+	quoted?: { key: any; message: any };
 }
 export interface ReactPayload {
 	key: proto.IMessageKey;

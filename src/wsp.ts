@@ -61,19 +61,43 @@ const startSock = async () => {
 
 	/**
 	 * update.status:
-	 * PENDING: No enviado.
-	 * SERVER_ACK: Enviado al servidor (1 check).
-	 * DELIVERY_ACK: Entregado al destinatario (2 checks grises).
-   	 + READ: Leído por el destinatario (2 checks azules).
-	 * PLAYED: (Para notas de voz, videos) Reproducido.
+	 * 1. PENDING: No enviado.
+	 * 2. SERVER_ACK: Enviado al servidor (1 check).
+	 * 3. DELIVERY_ACK: Entregado al destinatario (2 checks grises).
+   	 + 4. READ: Leído por el destinatario (2 checks azules).
+	 * 5. PLAYED: (Para notas de voz, videos) Reproducido.
 	 */
+	// Mapa para llevar el último ACK conocido por mensaje
+	const lastStatusById = new Map();
+
+	function logStatus(key: proto.IMessageKey, status: number) {
+		const names: Record<number, string> = {
+			[proto.WebMessageInfo.Status.PENDING]: "PENDING (1)",
+			[proto.WebMessageInfo.Status.SERVER_ACK]: "SERVER_ACK (2)",
+			[proto.WebMessageInfo.Status.DELIVERY_ACK]: "DELIVERY_ACK (3)",
+			[proto.WebMessageInfo.Status.READ]: "READ (4)",
+		};
+		console.log(`➡️ Mensaje ${key.id}: ${names[status] || status}`);
+		lastStatusById.set(key.id, status);
+	}
+
+	// Escucha de updates de ACKs 3 y 4
 	sock.ev.on("messages.update", (updates) => {
-		for (const update of updates) {
-			if (update.key.fromMe == false) {
-				console.log("Estado actualizado:", update);
+		for (const u of updates) {
+			if (!u.key.fromMe) {
+				return;
 			}
+			const prev = lastStatusById.get(u.key.id) || 0;
+
+			// Si llega un READ (4) pero nunca hubo DELIVERY (3), emito primero el 3
+			if (u.update?.status == 4 && prev < 3) {
+				logStatus(u.key, proto.WebMessageInfo.Status.DELIVERY_ACK);
+			}
+			logStatus(u.key, u.update?.status!);
 		}
 	});
+
+	sock.ev.on("creds.update", saveCreds);
 
 	sock.ev.process(async (events) => {
 		if (events["connection.update"]) {
@@ -150,10 +174,15 @@ const startSock = async () => {
 							// 	key: msg.key,
 							// 	emoji: "😊",
 							// });
-							sendMessage(sock, msg.key.remoteJid!, "txt", "text", {
-								text: "aaaa",
+
+							logStatus(msg.key, 1);
+							await sendMessage(sock, msg.key.remoteJid!, "media", "document", {
+								url: "./public/photoshop_reference.pdf",
+								caption: "holisss",
 								quoted: { key: msg.key, message: msg.message },
 							});
+
+							logStatus(msg.key, 2);
 						}
 					} else {
 						throw console.error("El mensaje excede el maximo de caracteres\n\n");
@@ -192,9 +221,9 @@ const startSock = async () => {
 			console.log(events["presence.update"]);
 		}
 
-		if (events["chats.update"]) {
-			console.log(events["chats.update"]);
-		}
+		// if (events["chats.update"]) {
+		// 	console.log(events["chats.update"]);
+		// }
 
 		if (events["chats.delete"]) {
 			console.log("chats deleted ", events["chats.delete"]);
