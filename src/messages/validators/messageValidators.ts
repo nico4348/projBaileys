@@ -1,5 +1,6 @@
 import fs from "fs";
 import ffmpeg from "fluent-ffmpeg";
+import { logStatus } from "../../wsp";
 
 export const textValidator = (text: string) => {
 	if (text.length > 4096) {

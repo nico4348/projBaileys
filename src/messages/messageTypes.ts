@@ -20,5 +20,5 @@ export interface ReactPayload {
 
 export type HandlerMap = Record<
 	string,
-	(sock: WASocket, jid: string, payload: any) => Promise<void>
+	(sock: WASocket, msgKey: proto.IMessageKey, jid: string, payload: any) => Promise<void>
 >;

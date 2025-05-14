@@ -3,7 +3,7 @@
 import { txtHandlers } from "./messageHandlers/txt";
 import { mediaHandlers } from "./messageHandlers/media";
 import { reactHandlers } from "./messageHandlers/react";
-import { delay, type WASocket } from "baileys";
+import { delay, type WASocket, proto } from "baileys";
 import {
 	type MediaType,
 	type HandlerMap,
@@ -11,12 +11,6 @@ import {
 	type MediaPayload,
 	type TextPayload,
 } from "./messageTypes";
-
-import {
-	audioDurationValidator,
-	size16MbValidator,
-	size2GbValidator,
-} from "./validators/messageValidators";
 
 export const getHandlers = (mediaType: MediaType): HandlerMap => {
 	const maps: Record<MediaType, HandlerMap> = {
@@ -29,6 +23,7 @@ export const getHandlers = (mediaType: MediaType): HandlerMap => {
 
 export const sendMessage = async (
 	sock: WASocket,
+	msgKey: proto.IMessageKey,
 	jid: string,
 	mediaType: MediaType, // "txt" | "media" | "react"
 	type: string, // "text", "react", "voiceNote", ...
@@ -45,7 +40,7 @@ export const sendMessage = async (
 	const handlers = getHandlers(mediaType);
 	const fn = handlers[type];
 	if (fn) {
-		await fn(sock, jid, payload);
+		await fn(sock, msgKey, jid, payload);
 	} else {
 		console.log("nadaaaaaa");
 	}

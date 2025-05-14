@@ -38,6 +38,22 @@ const onDemandMap = new Map<string, string>();
 const msgRetryCounterCache = new NodeCache();
 const groupCache = new NodeCache({});
 
+const lastStatusById = new Map();
+
+export function logStatus(key: proto.IMessageKey, status: number) {
+	const names: Record<number, string> = {
+		[0]: "Mensaje Usuario Recibido",
+		[1]: "Respuesta Validada",
+		[proto.WebMessageInfo.Status.SERVER_ACK]: "Respuesta enviada a Servidor Whatsapp",
+		[proto.WebMessageInfo.Status.DELIVERY_ACK]: "Respuesta recibida por el Usuario",
+		[proto.WebMessageInfo.Status.READ]: "Respuesta Leida",
+		[proto.WebMessageInfo.Status.PLAYED]: "Audio escuchado",
+		[6]: "Entrega Fallida",
+	};
+	console.log(`➡️ Mensaje ${key.id}: ${names[status] || status}`);
+	lastStatusById.set(key.id, status);
+}
+
 const startSock = async () => {
 	const { state, saveCreds } = await useMultiFileAuthState("baileys_auth_info");
 
@@ -68,18 +84,6 @@ const startSock = async () => {
 	 * 5. PLAYED: (Para notas de voz, videos) Reproducido.
 	 */
 	// Mapa para llevar el último ACK conocido por mensaje
-	const lastStatusById = new Map();
-
-	function logStatus(key: proto.IMessageKey, status: number) {
-		const names: Record<number, string> = {
-			[proto.WebMessageInfo.Status.PENDING]: "PENDING (1)",
-			[proto.WebMessageInfo.Status.SERVER_ACK]: "SERVER_ACK (2)",
-			[proto.WebMessageInfo.Status.DELIVERY_ACK]: "DELIVERY_ACK (3)",
-			[proto.WebMessageInfo.Status.READ]: "READ (4)",
-		};
-		console.log(`➡️ Mensaje ${key.id}: ${names[status] || status}`);
-		lastStatusById.set(key.id, status);
-	}
 
 	// Escucha de updates de ACKs 3 y 4
 	sock.ev.on("messages.update", (updates) => {
@@ -89,10 +93,13 @@ const startSock = async () => {
 			}
 			const prev = lastStatusById.get(u.key.id) || 0;
 
-			// Si llega un READ (4) pero nunca hubo DELIVERY (3), emito primero el 3
 			if (u.update?.status == 4 && prev < 3) {
 				logStatus(u.key, proto.WebMessageInfo.Status.DELIVERY_ACK);
 			}
+			if (u.update?.status == 5 && prev < 3) {
+				logStatus(u.key, proto.WebMessageInfo.Status.DELIVERY_ACK);
+			}
+
 			logStatus(u.key, u.update?.status!);
 		}
 	});
@@ -162,6 +169,7 @@ const startSock = async () => {
 
 			if (upsert.type === "notify") {
 				for (const msg of upsert.messages) {
+					logStatus(msg.key, 0);
 					const userJid = msg.key.participant || msg.key.remoteJid!;
 					const numero = userJid.split("@")[0];
 
@@ -174,14 +182,12 @@ const startSock = async () => {
 						// 	emoji: "😊",
 						// });
 
-						logStatus(msg.key, 1);
-						await sendMessage(sock, msg.key.remoteJid!, "media", "video", {
-							url: "./public/VID-20250513-WA0026.mp4",
+						await sendMessage(sock, msg.key, msg.key.remoteJid!, "media", "video", {
+							url: "./public/bbb_sunflower_1080p_30fps_normal.mp4",
 							caption: "holisss",
 							quoted: { key: msg.key, message: msg.message },
 						});
-
-						logStatus(msg.key, 2);
+						// logStatus(msg.key, 2);
 					}
 				}
 			}
