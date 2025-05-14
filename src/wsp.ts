@@ -1,12 +1,12 @@
 import { Boom } from "@hapi/boom";
 import NodeCache from "@cacheable/node-cache";
 import readline from "readline";
+import { sendMessage } from "./messages/sendMessage";
 import QRCode from "qrcode";
 import makeWASocket, {
 	type AnyMessageContent,
 	BinaryInfo,
 	delay,
-	makeInMemoryStore,
 	DisconnectReason,
 	downloadAndProcessHistorySyncNotification,
 	encodeWAM,
@@ -26,11 +26,8 @@ import fs from "fs";
 import P from "pino";
 import path from "path";
 import { lookup, extension } from "mime-types";
-import { stringify } from "querystring";
+import { error } from "console";
 
-const store = makeInMemoryStore({
-	logger: P({ level: "silent" }),
-});
 const logger = P(
 	{ timestamp: () => `,"time":"${new Date().toJSON()}"` },
 	P.destination("./wa-logs.txt")
@@ -38,12 +35,9 @@ const logger = P(
 logger.level = "silent";
 
 const onDemandMap = new Map<string, string>();
-// external map to store retry counts of messages when decryption/encryption fails
-// keep this out of the socket itself, so as to prevent a message decryption/encryption loop across socket restarts
 const msgRetryCounterCache = new NodeCache();
 const groupCache = new NodeCache({});
 
-// start a connection
 const startSock = async () => {
 	const { state, saveCreds } = await useMultiFileAuthState("baileys_auth_info");
 
@@ -62,133 +56,25 @@ const startSock = async () => {
 		msgRetryCounterCache,
 		generateHighQualityLinkPreview: true,
 		cachedGroupMetadata: async (jid) => groupCache.get(jid),
-		// ignore all broadcast messages -- to receive the same
-		// comment the line below out
-		// shouldIgnoreJid: jid => isJidBroadcast(jid),
-		// implement to handle retries & poll updates
 		getMessage,
 	});
 
-	// } else if (msg.message?.stickerMessage) {
-	// 	console.log("[[[[EL MENSAJE ES UN STICKER]]]]");
-	// } else {
-	// 	console.log("[[[[EL MENSAJE ES UN ALGO]]]]");
-	// }
-
-	const sendMessage = async (jid: string, type: string, payload: any) => {
-		switch (type) {
-			case "text":
-				await sock.sendMessage(jid, { text: payload.text });
-				break;
-
-			case "textQuoted":
-				await sock.sendMessage(jid, { text: payload.text }, { quoted: payload.quoted });
-
-				break;
-
-			case "voiceNote":
-				await sock.sendMessage(jid, { audio: { url: payload.url }, ptt: true });
-
-				break;
-
-			case "audio":
-				await sock.sendMessage(jid, { audio: { url: payload.url } });
-
-				break;
-
-			case "video":
-				await sock.sendMessage(jid, {
-					video: { url: payload.url },
-					caption: payload.caption,
-				});
-
-				break;
-
-			case "image":
-				await sock.sendMessage(jid, {
-					image: { url: payload.url },
-					caption: payload.caption,
-				});
-
-				break;
-
-			case "document":
-				const nombreArchivo = path.basename(payload.url);
-				const tipoMime = lookup(payload.url) || "application/octet-stream";
-
-				await sock.sendMessage(jid, {
-					document: { url: payload.url },
-					fileName: nombreArchivo,
-					mimetype: tipoMime,
-				});
-
-				break;
-
-			case "reaction":
-				await sock.sendMessage(jid, {
-					react: {
-						key: payload.key,
-						text: payload.emoji,
-					},
-				});
-
-				break;
-
-			case "sticker":
-				await sock.sendMessage(jid, { sticker: payload.url });
-
-				break;
-
-			default:
-				console.log("nadaaaaaa");
-				break;
+	/**
+	 * update.status:
+	 * PENDING: No enviado.
+	 * SERVER_ACK: Enviado al servidor (1 check).
+	 * DELIVERY_ACK: Entregado al destinatario (2 checks grises).
+   	 + READ: Leído por el destinatario (2 checks azules).
+	 * PLAYED: (Para notas de voz, videos) Reproducido.
+	 */
+	sock.ev.on("messages.update", (updates) => {
+		for (const update of updates) {
+			if (update.key.fromMe == false) {
+				console.log("Estado actualizado:", update);
+			}
 		}
-	};
+	});
 
-	//! const saveFiles = async (url: string, name: string = Date.now().toString(), mime: string) => {
-	// 	let mimetype = mime.split("/")[1];
-	// 	if (mimetype?.includes(";")) {
-	// 		mimetype.split(";")[0];
-	// 	}
-	// 	console.log(mimetype);
-
-	// 	fs.writeFile(`${name}.${mimetype}`, url, (err) => {
-	// 		if (err) {
-	// 			console.error("Error al guardar el archivo:", err);
-	// 		} else {
-	// 			console.log("Archivo guardado correctamente.");
-	// 		}
-	// 	});
-	// };
-
-	const sendMessageWQuote = async (msg: AnyMessageContent, jid: string, quoted = undefined) => {
-		await sock.presenceSubscribe(jid);
-		await delay(500);
-
-		await sock.sendPresenceUpdate("composing", jid);
-		await delay(2000);
-
-		await sock.sendPresenceUpdate("paused", jid);
-
-		await sock.sendMessage(jid, msg, { quoted });
-	};
-
-	const sendMessageWTyping = async (msg: AnyMessageContent, jid: string, quoted = undefined) => {
-		await sock.presenceSubscribe(jid);
-		await delay(500);
-
-		await sock.sendPresenceUpdate("composing", jid);
-		await delay(2000);
-
-		await sock.sendPresenceUpdate("paused", jid);
-		if (quoted) {
-			await sock.sendMessage(jid, msg, { quoted });
-		} else {
-			await sock.sendMessage(jid, msg);
-		}
-	};
-
-	store.bind(sock.ev);
 	sock.ev.process(async (events) => {
 		if (events["connection.update"]) {
 			const update = events["connection.update"];
@@ -239,7 +125,7 @@ const startSock = async () => {
 			const { chats, contacts, messages, isLatest, progress, syncType } =
 				events["messaging-history.set"];
 			if (syncType === proto.HistorySync.HistorySyncType.ON_DEMAND) {
-				console.log("received on-demand history sync, messages=", messages);
+				// console.log("received on-demand history sync, messages=", messages);
 			}
 			console.log(
 				`recv ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (is latest: ${isLatest}, progress: ${progress}%), type: ${syncType}`
@@ -248,22 +134,29 @@ const startSock = async () => {
 
 		if (events["messages.upsert"]) {
 			const upsert = events["messages.upsert"];
-			console.log("recv messages ", JSON.stringify(upsert, undefined, 2));
+			// console.log("recv messages ", JSON.stringify(upsert, undefined, 2));
 
 			if (upsert.type === "notify") {
 				for (const msg of upsert.messages) {
 					const userJid = msg.key.participant || msg.key.remoteJid!;
 					const numero = userJid.split("@")[0];
 
-					if (!msg.key.fromMe && !isJidNewsletter(msg.key?.remoteJid!)) {
-						console.log("replying to", msg.key.remoteJid);
-						await sock!.readMessages([msg.key]);
+					if (msg.message?.conversation?.length! < 4096) {
+						if (!msg.key.fromMe && !isJidNewsletter(msg.key?.remoteJid!)) {
+							console.log("replying to", msg.key.remoteJid);
+							await sock!.readMessages([msg.key]);
 
-						sendMessage(msg.key.remoteJid!, "sticker", {
-							key: msg.key,
-							text: "😊",
-						});
-						// await sendMessageWQuote({ text: "Hello there!" }, msg.key.remoteJid!, msg);
+							// sendMessage(sock, msg.key.remoteJid!, "react", "react", {
+							// 	key: msg.key,
+							// 	emoji: "😊",
+							// });
+							sendMessage(sock, msg.key.remoteJid!, "txt", "text", {
+								text: "aaaa",
+								quoted: { key: msg.key, message: msg.message },
+							});
+						}
+					} else {
+						throw console.error("El mensaje excede el maximo de caracteres\n\n");
 					}
 				}
 			}
@@ -303,6 +196,10 @@ const startSock = async () => {
 			console.log(events["chats.update"]);
 		}
 
+		if (events["chats.delete"]) {
+			console.log("chats deleted ", events["chats.delete"]);
+		}
+
 		if (events["contacts.update"]) {
 			for (const contact of events["contacts.update"]) {
 				if (typeof contact.imgUrl !== "undefined") {
@@ -313,10 +210,6 @@ const startSock = async () => {
 					console.log(`contact ${contact.id} has a new profile pic: ${newUrl}`);
 				}
 			}
-		}
-
-		if (events["chats.delete"]) {
-			console.log("chats deleted ", events["chats.delete"]);
 		}
 	});
 
