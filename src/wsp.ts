@@ -165,27 +165,23 @@ const startSock = async () => {
 					const userJid = msg.key.participant || msg.key.remoteJid!;
 					const numero = userJid.split("@")[0];
 
-					if (msg.message?.conversation?.length! < 4096) {
-						if (!msg.key.fromMe && !isJidNewsletter(msg.key?.remoteJid!)) {
-							console.log("replying to", msg.key.remoteJid);
-							await sock!.readMessages([msg.key]);
+					if (!msg.key.fromMe && !isJidNewsletter(msg.key?.remoteJid!)) {
+						console.log("replying to", msg.key.remoteJid);
+						await sock!.readMessages([msg.key]);
 
-							// sendMessage(sock, msg.key.remoteJid!, "react", "react", {
-							// 	key: msg.key,
-							// 	emoji: "😊",
-							// });
+						// sendMessage(sock, msg.key.remoteJid!, "react", "react", {
+						// 	key: msg.key,
+						// 	emoji: "😊",
+						// });
 
-							logStatus(msg.key, 1);
-							await sendMessage(sock, msg.key.remoteJid!, "media", "document", {
-								url: "./public/photoshop_reference.pdf",
-								caption: "holisss",
-								quoted: { key: msg.key, message: msg.message },
-							});
+						logStatus(msg.key, 1);
+						await sendMessage(sock, msg.key.remoteJid!, "media", "video", {
+							url: "./public/VID-20250513-WA0026.mp4",
+							caption: "holisss",
+							quoted: { key: msg.key, message: msg.message },
+						});
 
-							logStatus(msg.key, 2);
-						}
-					} else {
-						throw console.error("El mensaje excede el maximo de caracteres\n\n");
+						logStatus(msg.key, 2);
 					}
 				}
 			}

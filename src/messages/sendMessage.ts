@@ -12,6 +12,12 @@ import {
 	type TextPayload,
 } from "./messageTypes";
 
+import {
+	audioDurationValidator,
+	size16MbValidator,
+	size2GbValidator,
+} from "./validators/messageValidators";
+
 export const getHandlers = (mediaType: MediaType): HandlerMap => {
 	const maps: Record<MediaType, HandlerMap> = {
 		txt: txtHandlers,
