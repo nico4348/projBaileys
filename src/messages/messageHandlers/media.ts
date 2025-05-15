@@ -18,6 +18,7 @@ export const mediaHandlers: Record<
 		if (await audioDurationValidator(url)) {
 			logStatus(msgKey, 1);
 			await sock.sendMessage(jid, { audio: { url }, ptt: true }, { quoted });
+			logStatus(msgKey, 2);
 		} else {
 			logStatus(msgKey, 6);
 		}
@@ -27,6 +28,7 @@ export const mediaHandlers: Record<
 		if (await audioDurationValidator(url)) {
 			logStatus(msgKey, 1);
 			await sock.sendMessage(jid, { audio: { url } }, { quoted });
+			logStatus(msgKey, 2);
 		} else {
 			logStatus(msgKey, 6);
 		}
@@ -36,6 +38,7 @@ export const mediaHandlers: Record<
 		if (size16MbValidator(url)) {
 			logStatus(msgKey, 1);
 			await sock.sendMessage(jid, { video: { url }, caption }, { quoted });
+			logStatus(msgKey, 2);
 		} else {
 			logStatus(msgKey, 6);
 		}
@@ -45,6 +48,7 @@ export const mediaHandlers: Record<
 		if (size16MbValidator(url)) {
 			logStatus(msgKey, 1);
 			await sock.sendMessage(jid, { image: { url }, caption }, { quoted });
+			logStatus(msgKey, 2);
 		} else {
 			logStatus(msgKey, 6);
 		}
@@ -54,6 +58,7 @@ export const mediaHandlers: Record<
 		if (size16MbValidator(url)) {
 			logStatus(msgKey, 1);
 			await sock.sendMessage(jid, { sticker: { url } }, { quoted });
+			logStatus(msgKey, 2);
 		} else {
 			logStatus(msgKey, 6);
 		}
@@ -74,6 +79,7 @@ export const mediaHandlers: Record<
 				},
 				{ quoted }
 			);
+			logStatus(msgKey, 2);
 		} else {
 			logStatus(msgKey, 6);
 		}

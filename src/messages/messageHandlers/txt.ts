@@ -11,6 +11,7 @@ export const txtHandlers: Record<
 		if (textValidator(text)) {
 			logStatus(msgKey, 1);
 			await sock.sendMessage(jid, { text }, { quoted });
+			logStatus(msgKey, 2);
 		} else {
 			logStatus(msgKey, 6);
 		}

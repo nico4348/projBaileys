@@ -1,43 +1,28 @@
 import { Boom } from "@hapi/boom";
 import NodeCache from "@cacheable/node-cache";
-import readline from "readline";
 import { sendMessage } from "./messages/sendMessage";
-import QRCode from "qrcode";
 import makeWASocket, {
-	type AnyMessageContent,
-	BinaryInfo,
-	delay,
 	DisconnectReason,
-	downloadAndProcessHistorySyncNotification,
-	encodeWAM,
 	fetchLatestBaileysVersion,
 	getAggregateVotesInPollMessage,
-	getHistoryMsg,
 	isJidNewsletter,
 	makeCacheableSignalKeyStore,
 	proto,
+	useMultiFileAuthState,
 	type WAMessageKey,
 	type WAMessageContent,
-	useMultiFileAuthState,
 } from "baileys";
-//import MAIN_LOGGER from '../src/Utils/logger'
-import open from "open";
-import fs from "fs";
+
 import P from "pino";
-import path from "path";
-import { lookup, extension } from "mime-types";
-import { error } from "console";
 
 const logger = P(
 	{ timestamp: () => `,"time":"${new Date().toJSON()}"` },
 	P.destination("./wa-logs.txt")
 );
+
 logger.level = "silent";
 
-const onDemandMap = new Map<string, string>();
 const msgRetryCounterCache = new NodeCache();
-const groupCache = new NodeCache({});
-
 const lastStatusById = new Map();
 
 export function logStatus(key: proto.IMessageKey, status: number) {
@@ -58,7 +43,6 @@ const startSock = async () => {
 	const { state, saveCreds } = await useMultiFileAuthState("baileys_auth_info");
 
 	const { version, isLatest } = await fetchLatestBaileysVersion();
-
 	console.log(`using WA v${version.join(".")}, isLatest: ${isLatest}`);
 
 	const sock = makeWASocket({
@@ -71,7 +55,6 @@ const startSock = async () => {
 		},
 		msgRetryCounterCache,
 		generateHighQualityLinkPreview: true,
-		cachedGroupMetadata: async (jid) => groupCache.get(jid),
 		getMessage,
 	});
 
@@ -135,14 +118,6 @@ const startSock = async () => {
 			await saveCreds();
 		}
 
-		if (events["labels.association"]) {
-			console.log(events["labels.association"]);
-		}
-
-		if (events["labels.edit"]) {
-			console.log(events["labels.edit"]);
-		}
-
 		if (events.call) {
 			await new Promise((resolve) => setTimeout(resolve, 2000));
 
@@ -150,17 +125,6 @@ const startSock = async () => {
 			if (call) {
 				await sock!.rejectCall(call.id, call.from);
 			}
-		}
-
-		if (events["messaging-history.set"]) {
-			const { chats, contacts, messages, isLatest, progress, syncType } =
-				events["messaging-history.set"];
-			if (syncType === proto.HistorySync.HistorySyncType.ON_DEMAND) {
-				// console.log("received on-demand history sync, messages=", messages);
-			}
-			console.log(
-				`recv ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (is latest: ${isLatest}, progress: ${progress}%), type: ${syncType}`
-			);
 		}
 
 		if (events["messages.upsert"]) {
@@ -177,17 +141,16 @@ const startSock = async () => {
 						console.log("replying to", msg.key.remoteJid);
 						await sock!.readMessages([msg.key]);
 
-						// sendMessage(sock, msg.key.remoteJid!, "react", "react", {
+						// sendMessage(sock, msg.key, msg.key.remoteJid!, "react", "react", {
 						// 	key: msg.key,
 						// 	emoji: "😊",
 						// });
 
 						await sendMessage(sock, msg.key, msg.key.remoteJid!, "media", "video", {
-							url: "./public/bbb_sunflower_1080p_30fps_normal.mp4",
+							url: "./public/DSC0603-1.webp",
 							caption: "holisss",
 							quoted: { key: msg.key, message: msg.message },
 						});
-						// logStatus(msg.key, 2);
 					}
 				}
 			}
@@ -221,14 +184,6 @@ const startSock = async () => {
 
 		if (events["presence.update"]) {
 			console.log(events["presence.update"]);
-		}
-
-		// if (events["chats.update"]) {
-		// 	console.log(events["chats.update"]);
-		// }
-
-		if (events["chats.delete"]) {
-			console.log("chats deleted ", events["chats.delete"]);
 		}
 
 		if (events["contacts.update"]) {
