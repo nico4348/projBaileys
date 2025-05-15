@@ -1,19 +1,23 @@
 import { Boom } from "@hapi/boom";
 import NodeCache from "@cacheable/node-cache";
 import { sendMessage } from "./messages/sendMessage";
+import readline from "readline";
+
 import makeWASocket, {
+	getAggregateVotesInPollMessage,
 	DisconnectReason,
 	fetchLatestBaileysVersion,
-	getAggregateVotesInPollMessage,
 	isJidNewsletter,
 	makeCacheableSignalKeyStore,
 	proto,
 	useMultiFileAuthState,
 	type WAMessageKey,
 	type WAMessageContent,
+	Browsers,
 } from "baileys";
 
 import P from "pino";
+import { downloadMedia } from "./messages/downloadMessage";
 
 const logger = P(
 	{ timestamp: () => `,"time":"${new Date().toJSON()}"` },
@@ -41,23 +45,50 @@ export function logStatus(key: proto.IMessageKey, status: number) {
 
 const startSock = async () => {
 	const { state, saveCreds } = await useMultiFileAuthState("baileys_auth_info");
-
 	const { version, isLatest } = await fetchLatestBaileysVersion();
 	console.log(`using WA v${version.join(".")}, isLatest: ${isLatest}`);
 
+	// Configuración mejorada del socket
 	const sock = makeWASocket({
-		version,
+		version: [2, 2413, 1], // Versión estable reciente
 		logger,
-		printQRInTerminal: true,
+		printQRInTerminal: false,
 		auth: {
 			creds: state.creds,
 			keys: makeCacheableSignalKeyStore(state.keys, logger),
 		},
-		msgRetryCounterCache,
-		generateHighQualityLinkPreview: true,
-		getMessage,
+		browser: Browsers.ubuntu("MyApp"),
+		connectTimeoutMs: 60_000, // Aumenta timeout
 	});
 
+	// Intento de pairing con reintentos
+	const tryPairing = async (attempt = 1) => {
+		try {
+			if (!sock.authState.creds.registered) {
+				console.log("⌛ Generando código de emparejamiento...");
+				const code = await sock.requestPairingCode("573022949109");
+				console.log(`✅ Código: ${code}\nIngrésalo en WhatsApp en 20 segundos:`);
+				console.log("Ajustes → Dispositivos vinculados → Vincular dispositivo");
+
+				// Espera activa
+				await new Promise((resolve) => setTimeout(resolve, 30_000));
+
+				if (!sock.authState.creds.registered) {
+					throw new Error("Tiempo agotado");
+				}
+			}
+		} catch (error) {
+			if (attempt <= 3) {
+				console.log(`🔄 Reintento ${attempt}/3 (${error.message})`);
+				await tryPairing(attempt + 1);
+			} else {
+				console.error("❌ Fallo definitivo. Prueba más tarde o usa QR.");
+				process.exit(1);
+			}
+		}
+	};
+
+	await tryPairing();
 	/**
 	 * update.status:
 	 * 1. PENDING: No enviado.
@@ -138,6 +169,7 @@ const startSock = async () => {
 					const numero = userJid.split("@")[0];
 
 					if (!msg.key.fromMe && !isJidNewsletter(msg.key?.remoteJid!)) {
+						downloadMedia(msg);
 						console.log("replying to", msg.key.remoteJid);
 						await sock!.readMessages([msg.key]);
 
