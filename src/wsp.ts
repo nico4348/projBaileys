@@ -1,242 +1,183 @@
 import { Boom } from "@hapi/boom";
 import NodeCache from "@cacheable/node-cache";
-import { sendMessage } from "./messages/sendMessage";
-import readline from "readline";
-
 import makeWASocket, {
-	getAggregateVotesInPollMessage,
-	DisconnectReason,
 	fetchLatestBaileysVersion,
-	isJidNewsletter,
-	makeCacheableSignalKeyStore,
+	Browsers,
+	DisconnectReason,
 	proto,
 	useMultiFileAuthState,
+	makeCacheableSignalKeyStore,
+	isJidNewsletter,
 	type WAMessageKey,
-	type WAMessageContent,
-	Browsers,
 } from "baileys";
-
 import P from "pino";
+import { sendMessage } from "./messages/sendMessage";
 import { downloadMedia } from "./messages/downloadMessage";
-
-const logger = P(
-	{ timestamp: () => `,"time":"${new Date().toJSON()}"` },
-	P.destination("./wa-logs.txt")
-);
-
-logger.level = "silent";
-
-const msgRetryCounterCache = new NodeCache();
-const lastStatusById = new Map();
-
-export function logStatus(key: proto.IMessageKey, status: number) {
+import fs from "fs/promises";
+import path from "path";
+/**
+ * Función global exportada para loguear estados de mensajes.
+ */
+export function logStatus(key: WAMessageKey, status: number, prev: number = 0) {
 	const names: Record<number, string> = {
-		[0]: "Mensaje Usuario Recibido",
-		[1]: "Respuesta Validada",
-		[proto.WebMessageInfo.Status.SERVER_ACK]: "Respuesta enviada a Servidor Whatsapp",
-		[proto.WebMessageInfo.Status.DELIVERY_ACK]: "Respuesta recibida por el Usuario",
-		[proto.WebMessageInfo.Status.READ]: "Respuesta Leida",
-		[proto.WebMessageInfo.Status.PLAYED]: "Audio escuchado",
-		[6]: "Entrega Fallida",
+		0: "Mensaje Usuario Recibido",
+		1: "Respuesta Validada",
+		[proto.WebMessageInfo.Status.SERVER_ACK]: "Enviado al Servidor",
+		[proto.WebMessageInfo.Status.DELIVERY_ACK]: "Entregado al Destinatario",
+		[proto.WebMessageInfo.Status.READ]: "Leído",
+		[proto.WebMessageInfo.Status.PLAYED]: "Reproducido",
+		6: "Entrega Fallida",
 	};
-	console.log(`➡️ Mensaje ${key.id}: ${names[status] || status}`);
-	lastStatusById.set(key.id, status);
+	if (status > prev) {
+		console.log(`➡️ Mensaje ${key.id}: ${names[status] || status}`);
+	}
 }
 
-const startSock = async () => {
-	const { state, saveCreds } = await useMultiFileAuthState("baileys_auth_info");
-	const { version, isLatest } = await fetchLatestBaileysVersion();
-	console.log(`using WA v${version.join(".")}, isLatest: ${isLatest}`);
+interface NumberConfig {
+	number: string;
+	authFolder: string;
+}
 
-	// Configuración mejorada del socket
-	const sock = makeWASocket({
-		version: [2, 2413, 1], // Versión estable reciente
-		logger,
-		printQRInTerminal: false,
-		auth: {
-			creds: state.creds,
-			keys: makeCacheableSignalKeyStore(state.keys, logger),
-		},
-		browser: Browsers.ubuntu("MyApp"),
-		connectTimeoutMs: 60_000, // Aumenta timeout
-	});
+export class WhatsAppBot {
+	private sock: ReturnType<typeof makeWASocket> | null = null;
+	private logger = P(
+		{ timestamp: () => `,'time':'${new Date().toISOString()}'` },
+		P.destination("./wa-logs.txt")
+	);
+	private retryCache = new NodeCache();
+	private lastStatus = new Map<string, number>();
 
-	// Intento de pairing con reintentos
-	const tryPairing = async (attempt = 1) => {
-		try {
-			if (!sock.authState.creds.registered) {
-				console.log("⌛ Generando código de emparejamiento...");
-				const code = await sock.requestPairingCode("573022949109");
-				console.log(`✅ Código: ${code}\nIngrésalo en WhatsApp en 20 segundos:`);
-				console.log("Ajustes → Dispositivos vinculados → Vincular dispositivo");
-
-				// Espera activa
-				await new Promise((resolve) => setTimeout(resolve, 30_000));
-
-				if (!sock.authState.creds.registered) {
-					throw new Error("Tiempo agotado");
-				}
-			}
-		} catch (error) {
-			if (attempt <= 3) {
-				console.log(`🔄 Reintento ${attempt}/3 (${error.message})`);
-				await tryPairing(attempt + 1);
-			} else {
-				console.error("❌ Fallo definitivo. Prueba más tarde o usa QR.");
-				process.exit(1);
-			}
-		}
-	};
-
-	await tryPairing();
-	/**
-	 * update.status:
-	 * 1. PENDING: No enviado.
-	 * 2. SERVER_ACK: Enviado al servidor (1 check).
-	 * 3. DELIVERY_ACK: Entregado al destinatario (2 checks grises).
-   	 + 4. READ: Leído por el destinatario (2 checks azules).
-	 * 5. PLAYED: (Para notas de voz, videos) Reproducido.
-	 */
-	// Mapa para llevar el último ACK conocido por mensaje
-
-	// Escucha de updates de ACKs 3 y 4
-	sock.ev.on("messages.update", (updates) => {
-		for (const u of updates) {
-			if (!u.key.fromMe) {
-				return;
-			}
-			const prev = lastStatusById.get(u.key.id) || 0;
-
-			if (u.update?.status == 4 && prev < 3) {
-				logStatus(u.key, proto.WebMessageInfo.Status.DELIVERY_ACK);
-			}
-			if (u.update?.status == 5 && prev < 3) {
-				logStatus(u.key, proto.WebMessageInfo.Status.DELIVERY_ACK);
-			}
-
-			logStatus(u.key, u.update?.status!);
-		}
-	});
-
-	sock.ev.on("creds.update", saveCreds);
-
-	sock.ev.process(async (events) => {
-		if (events["connection.update"]) {
-			const update = events["connection.update"];
-
-			const { connection, lastDisconnect, qr } = update;
-
-			// if (qr) {
-			// 	console.log(await QRCode.toString(qr, { type: "terminal" }));
-			// }
-
-			if (connection === "close") {
-				//* Reconexion
-				if (
-					(lastDisconnect?.error as Boom)?.output?.statusCode !==
-					DisconnectReason.loggedOut
-				) {
-					startSock();
-				} else {
-					console.log("Connection closed. You are logged out.");
-				}
-			}
-
-			console.log("connection update", update);
-		}
-
-		if (events["creds.update"]) {
-			await saveCreds();
-		}
-
-		if (events.call) {
-			await new Promise((resolve) => setTimeout(resolve, 2000));
-
-			const call = events.call[0];
-			if (call) {
-				await sock!.rejectCall(call.id, call.from);
-			}
-		}
-
-		if (events["messages.upsert"]) {
-			const upsert = events["messages.upsert"];
-			// console.log("recv messages ", JSON.stringify(upsert, undefined, 2));
-
-			if (upsert.type === "notify") {
-				for (const msg of upsert.messages) {
-					logStatus(msg.key, 0);
-					const userJid = msg.key.participant || msg.key.remoteJid!;
-					const numero = userJid.split("@")[0];
-
-					if (!msg.key.fromMe && !isJidNewsletter(msg.key?.remoteJid!)) {
-						downloadMedia(msg);
-						console.log("replying to", msg.key.remoteJid);
-						await sock!.readMessages([msg.key]);
-
-						// sendMessage(sock, msg.key, msg.key.remoteJid!, "react", "react", {
-						// 	key: msg.key,
-						// 	emoji: "😊",
-						// });
-
-						await sendMessage(sock, msg.key, msg.key.remoteJid!, "media", "video", {
-							url: "./public/DSC0603-1.webp",
-							caption: "holisss",
-							quoted: { key: msg.key, message: msg.message },
-						});
-					}
-				}
-			}
-		}
-
-		// messages updated like status delivered, message deleted etc.
-		if (events["messages.update"]) {
-			for (const { key, update } of events["messages.update"]) {
-				if (update.pollUpdates) {
-					const pollCreation: proto.IMessage = {};
-					if (pollCreation) {
-						console.log(
-							"got poll update, aggregation: ",
-							getAggregateVotesInPollMessage({
-								message: pollCreation,
-								pollUpdates: update.pollUpdates,
-							})
-						);
-					}
-				}
-			}
-		}
-
-		if (events["message-receipt.update"]) {
-			console.log(events["message-receipt.update"]);
-		}
-
-		if (events["messages.reaction"]) {
-			console.log(events["messages.reaction"]);
-		}
-
-		if (events["presence.update"]) {
-			console.log(events["presence.update"]);
-		}
-
-		if (events["contacts.update"]) {
-			for (const contact of events["contacts.update"]) {
-				if (typeof contact.imgUrl !== "undefined") {
-					const newUrl =
-						contact.imgUrl === null
-							? null
-							: await sock!.profilePictureUrl(contact.id!).catch(() => null);
-					console.log(`contact ${contact.id} has a new profile pic: ${newUrl}`);
-				}
-			}
-		}
-	});
-
-	return sock;
-
-	async function getMessage(key: WAMessageKey): Promise<WAMessageContent | undefined> {
-		console.log("[getMessage]");
-		return proto.Message.fromObject({});
+	constructor(private config: NumberConfig) {
+		this.logger.level = "silent";
 	}
-};
 
-startSock();
+	public async start() {
+		const { number, authFolder } = this.config;
+		const { state, saveCreds } = await useMultiFileAuthState(authFolder);
+		const { version } = await fetchLatestBaileysVersion();
+
+		this.sock = makeWASocket({
+			version,
+			logger: this.logger,
+			printQRInTerminal: true,
+			auth: {
+				creds: state.creds,
+				keys: makeCacheableSignalKeyStore(state.keys, this.logger),
+			},
+			browser: Browsers.ubuntu(`MultiBot_${number}`),
+		});
+
+		this.sock.ev.on("connection.update", (update) => {
+			if (update.qr) {
+				console.log(`Se ha generado un nuevo QR para ${number}`);
+			}
+		});
+
+		this.sock.ev.on("creds.update", saveCreds);
+		this.registerEventHandlers();
+
+		console.log(`✅ Bot inicializado para ${number}`);
+	}
+
+	private registerEventHandlers() {
+		if (!this.sock) return;
+
+		this.sock.ev.on("connection.update", ({ connection, lastDisconnect }) =>
+			this.onConnectionUpdate(connection ?? "", lastDisconnect)
+		);
+
+		this.sock.ev.on("messages.update", (updates) => this.onMessageAckUpdates(updates));
+
+		this.sock.ev.on("messages.upsert", async (upsert) => this.onIncomingMessages(upsert));
+	}
+
+	private isReconnecting = false;
+
+	private async onConnectionUpdate(connection: string, lastDisconnect: any) {
+		const { number } = this.config;
+		if (connection === "close") {
+			if (this.isReconnecting) return;
+			this.isReconnecting = true;
+
+			if (
+				(lastDisconnect?.error as Boom)?.output?.statusCode === DisconnectReason.loggedOut
+			) {
+				console.log(`Sesión cerrada para ${number}, borrando credenciales...`);
+
+				// Borrar la carpeta de autenticación de Baileys
+				try {
+					await fs.rm(this.config.authFolder, { recursive: true, force: true });
+					console.log("Carpeta de autenticación eliminada.");
+				} catch (err) {
+					console.error("Error al borrar la carpeta de autenticación:", err);
+				}
+
+				console.log(`Sesión cerrada para ${number}, pero se intentará reconectar...`);
+			} else {
+				console.log(`Reconectando ${number}...`);
+			}
+			await this.restartBot();
+
+			this.isReconnecting = false;
+		} else if (connection === "open") {
+			console.log(`Conexión abierta para ${number}`);
+		}
+	}
+
+	private onMessageAckUpdates(updates: any[]) {
+		for (const u of updates) {
+			if (!u.key.fromMe) continue;
+			const prev = this.lastStatus.get(u.key.id) || 0;
+			const status = u.update?.status;
+			if (status !== undefined) {
+				logStatus(u.key, status, prev);
+				this.lastStatus.set(u.key.id, status);
+			}
+		}
+	}
+
+	private async onIncomingMessages(upsert: any) {
+		if (upsert.type !== "notify" || !this.sock) return;
+
+		for (const msg of upsert.messages) {
+			if (msg.key.fromMe) continue;
+			if (isJidNewsletter(msg.key.remoteJid!)) continue;
+
+			logStatus(msg.key, 0, 0);
+			downloadMedia(msg);
+
+			console.log("🔔 Nuevo mensaje de", msg.key.remoteJid);
+
+			await this.sock.readMessages([msg.key]);
+			await sendMessage(this.sock, msg.key, msg.key.remoteJid!, "media", "video", {
+				url: "./public/DSC0603-1.webp",
+				caption: "holisss",
+				quoted: { key: msg.key, message: msg.message },
+			});
+		}
+	}
+
+	private async restartBot() {
+		if (this.sock) {
+			try {
+				console.log(`Cerrando sesión previa para ${this.config.number}`);
+				this.sock.end(undefined);
+			} catch (e) {
+				console.error(`Error cerrando sesión previa para ${this.config.number}:`, e);
+			}
+			this.sock = null;
+		}
+		await this.start();
+	}
+}
+
+// Inicializar bots
+const configs: NumberConfig[] = [
+	{ number: "573144864063", authFolder: "baileys_auth_info_2" },
+	{ number: "573022949109", authFolder: "baileys_auth_info_1" },
+];
+
+configs.forEach((cfg) => {
+	const bot = new WhatsAppBot(cfg);
+	bot.start().catch(console.error);
+});
