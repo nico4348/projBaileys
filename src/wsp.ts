@@ -2,7 +2,7 @@ import { Boom } from "@hapi/boom";
 import NodeCache from "@cacheable/node-cache";
 import { sendMessage } from "./messages/sendMessage";
 import readline from "readline";
-
+import { usePostgresAuthState } from "./bd";
 import makeWASocket, {
 	getAggregateVotesInPollMessage,
 	DisconnectReason,
@@ -44,21 +44,21 @@ export function logStatus(key: proto.IMessageKey, status: number) {
 }
 
 const startSock = async () => {
-	const { state, saveCreds } = await useMultiFileAuthState("baileys_auth_info");
+	// const { state, saveCreds } = await useMultiFileAuthState("baileys_auth_info"); //* Auth en local
+	const { state, saveCreds } = await usePostgresAuthState();
 	const { version, isLatest } = await fetchLatestBaileysVersion();
 	console.log(`using WA v${version.join(".")}, isLatest: ${isLatest}`);
 
-	// Configuración mejorada del socket
 	const sock = makeWASocket({
-		version: [2, 2413, 1], // Versión estable reciente
+		version,
 		logger,
-		printQRInTerminal: false,
+		printQRInTerminal: true,
 		auth: {
 			creds: state.creds,
 			keys: makeCacheableSignalKeyStore(state.keys, logger),
 		},
 		browser: Browsers.ubuntu("MyApp"),
-		connectTimeoutMs: 60_000, // Aumenta timeout
+		connectTimeoutMs: 60_000,
 	});
 
 	// Intento de pairing con reintentos
@@ -88,18 +88,6 @@ const startSock = async () => {
 		}
 	};
 
-	await tryPairing();
-	/**
-	 * update.status:
-	 * 1. PENDING: No enviado.
-	 * 2. SERVER_ACK: Enviado al servidor (1 check).
-	 * 3. DELIVERY_ACK: Entregado al destinatario (2 checks grises).
-   	 + 4. READ: Leído por el destinatario (2 checks azules).
-	 * 5. PLAYED: (Para notas de voz, videos) Reproducido.
-	 */
-	// Mapa para llevar el último ACK conocido por mensaje
-
-	// Escucha de updates de ACKs 3 y 4
 	sock.ev.on("messages.update", (updates) => {
 		for (const u of updates) {
 			if (!u.key.fromMe) {
