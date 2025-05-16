@@ -3,10 +3,10 @@ import { type ReactPayload } from "../messageTypes";
 
 export const reactHandlers: Record<
 	string,
-	(sock: WASocket, msgKey: proto.IMessageKey, jid: string, payload: ReactPayload) => Promise<void>
+	(sock: WASocket, msgId: string, jid: string, payload: ReactPayload) => Promise<string>
 > = {
-	react: async (sock, msgKey, jid, { key, emoji }) => {
-		await sock.sendMessage(jid, { react: { key: key, text: emoji } });
-		return;
+	react: async (sock, msgId, jid, { key, emoji }) => {
+		const msg = await sock.sendMessage(jid, { react: { key: key, text: emoji } });
+		return msg?.key.id ?? "";
 	},
 };

@@ -33,6 +33,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Finder (MacOS) folder config
 .DS_Store
 
-baileys_auth_info
+baileys_auth_info_1
+baileys_auth_info_2
 public/
 media/

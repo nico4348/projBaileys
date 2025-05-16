@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { downloadContentFromMessage } from "baileys";
+import { downloadContentFromMessage, type WASocket } from "baileys";
 
 const MEDIA_DIR = path.join(__dirname, "../../media");
 
@@ -56,4 +56,17 @@ export const downloadMedia = async (msg: any): Promise<void> => {
 
 	const buffer = Buffer.concat(chunks);
 	await saveBufferToFile(buffer, info.filename);
+};
+
+export const verifyOnWhatsApp = async (to: string, sock: WASocket): Promise<boolean> => {
+	if (!sock) return false;
+
+	try {
+		const result = await sock.onWhatsApp(`${to}@s.whatsapp.net`);
+		if (result && result[0]?.exists) return true;
+		return false;
+	} catch (error) {
+		console.error("Error al verificar número en WhatsApp:", error);
+		return false;
+	}
 };

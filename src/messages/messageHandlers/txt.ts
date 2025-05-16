@@ -2,18 +2,21 @@ import { proto, type WASocket } from "baileys";
 import { type TextPayload } from "../messageTypes";
 import { textValidator } from "../validators/messageValidators";
 import { logStatus } from "../../wsp";
+import { randomUUID } from "crypto";
 
 export const txtHandlers: Record<
 	string,
-	(sock: WASocket, msgKey: proto.IMessageKey, jid: string, payload: TextPayload) => Promise<void>
+	(sock: WASocket, msgId: string, jid: string, payload: TextPayload) => Promise<string>
 > = {
-	text: async (sock, msgKey, jid, { text, quoted }) => {
+	text: async (sock, msgId, jid, { text, quoted }) => {
 		if (textValidator(text)) {
-			logStatus(msgKey, 1);
-			await sock.sendMessage(jid, { text }, { quoted });
-			logStatus(msgKey, 2);
+			logStatus(msgId, 1);
+			const msg = await sock.sendMessage(jid, { text }, { quoted });
+			logStatus(msgId, 2);
+			return msg?.key.id ?? "";
 		} else {
-			logStatus(msgKey, 6);
+			logStatus(msgId, 6);
+			return "";
 		}
 	},
 };

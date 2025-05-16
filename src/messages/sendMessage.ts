@@ -3,7 +3,7 @@
 import { txtHandlers } from "./messageHandlers/txt";
 import { mediaHandlers } from "./messageHandlers/media";
 import { reactHandlers } from "./messageHandlers/react";
-import { delay, type WASocket, proto } from "baileys";
+import { delay, type WASocket } from "baileys";
 import {
 	type MediaType,
 	type HandlerMap,
@@ -11,6 +11,9 @@ import {
 	type MediaPayload,
 	type TextPayload,
 } from "./messageTypes";
+import { verifyOnWhatsApp } from "./downloadMessage";
+import { getSocket } from "../socketManager";
+import { randomUUID } from "crypto";
 
 export const getHandlers = (mediaType: MediaType): HandlerMap => {
 	const maps: Record<MediaType, HandlerMap> = {
@@ -22,29 +25,40 @@ export const getHandlers = (mediaType: MediaType): HandlerMap => {
 };
 
 export const sendMessage = async (
-	sock: WASocket,
-	msgKey: proto.IMessageKey,
-	jid: string,
+	from: string,
+	to: string,
 	mediaType: MediaType, // "txt" | "media" | "react"
 	type: string, // "text", "react", "voiceNote", ...
-	payload: ReactPayload | MediaPayload | TextPayload
-) => {
-	await sock.presenceSubscribe(jid);
-	await delay(500);
+	payload: ReactPayload | MediaPayload | TextPayload,
+	msgId: string = randomUUID()
+): Promise<string> => {
+	const sock: WASocket = getSocket(`sock_${from}`);
+	const jid = `${to}@s.whatsapp.net`;
 
-	await sock.sendPresenceUpdate("composing", jid);
-	await delay(2000);
+	if (await verifyOnWhatsApp(to, sock)) {
+		await sock.presenceSubscribe(jid);
+		await delay(500);
 
-	await sock.sendPresenceUpdate("paused", jid);
+		await sock.sendPresenceUpdate("composing", jid);
+		await delay(2000);
 
-	const handlers = getHandlers(mediaType);
-	const fn = handlers[type];
-	if (fn) {
-		await fn(sock, msgKey, jid, payload);
+		await sock.sendPresenceUpdate("paused", jid);
+
+		const handlers = getHandlers(mediaType);
+		const fn = handlers[type];
+		if (fn) {
+			const newId = await fn(sock, msgId, jid, payload);
+			return newId;
+		} else {
+			console.log("nadaaaaaa");
+		}
+		return msgId;
 	} else {
-		console.log("nadaaaaaa");
+		console.log("Error, Usuario no registrado en Whatsapp");
+		return "";
 	}
 };
+// const sockP = getSocket("sock_573144864063");
 
 /**
  * {

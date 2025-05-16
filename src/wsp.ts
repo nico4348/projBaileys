@@ -8,17 +8,16 @@ import makeWASocket, {
 	useMultiFileAuthState,
 	makeCacheableSignalKeyStore,
 	isJidNewsletter,
-	type WAMessageKey,
 } from "baileys";
 import P from "pino";
 import { sendMessage } from "./messages/sendMessage";
 import { downloadMedia } from "./messages/downloadMessage";
 import fs from "fs/promises";
-import path from "path";
+import { addSocket } from "./socketManager";
 /**
  * Función global exportada para loguear estados de mensajes.
  */
-export function logStatus(key: WAMessageKey, status: number, prev: number = 0) {
+export function logStatus(msgId: string, status: number, prev: number = 0) {
 	const names: Record<number, string> = {
 		0: "Mensaje Usuario Recibido",
 		1: "Respuesta Validada",
@@ -29,7 +28,7 @@ export function logStatus(key: WAMessageKey, status: number, prev: number = 0) {
 		6: "Entrega Fallida",
 	};
 	if (status > prev) {
-		console.log(`➡️ Mensaje ${key.id}: ${names[status] || status}`);
+		console.log(`➡️ Mensaje ${msgId}: ${names[status] || status}`);
 	}
 }
 
@@ -39,6 +38,8 @@ interface NumberConfig {
 }
 
 export class WhatsAppBot {
+	public from: string;
+	public id: string;
 	private sock: ReturnType<typeof makeWASocket> | null = null;
 	private logger = P(
 		{ timestamp: () => `,'time':'${new Date().toISOString()}'` },
@@ -48,6 +49,8 @@ export class WhatsAppBot {
 	private lastStatus = new Map<string, number>();
 
 	constructor(private config: NumberConfig) {
+		this.from = config.number;
+		this.id = `sock_${config.number}`; // puedes personalizar esto
 		this.logger.level = "silent";
 	}
 
@@ -55,18 +58,20 @@ export class WhatsAppBot {
 		const { number, authFolder } = this.config;
 		const { state, saveCreds } = await useMultiFileAuthState(authFolder);
 		const { version } = await fetchLatestBaileysVersion();
-
 		this.sock = makeWASocket({
 			version,
 			logger: this.logger,
 			printQRInTerminal: true,
+			msgRetryCounterCache: this.retryCache,
 			auth: {
 				creds: state.creds,
 				keys: makeCacheableSignalKeyStore(state.keys, this.logger),
 			},
 			browser: Browsers.ubuntu(`MultiBot_${number}`),
+			generateHighQualityLinkPreview: true,
 		});
 
+		addSocket(this.id, this.sock);
 		this.sock.ev.on("connection.update", (update) => {
 			if (update.qr) {
 				console.log(`Se ha generado un nuevo QR para ${number}`);
@@ -130,7 +135,7 @@ export class WhatsAppBot {
 			const prev = this.lastStatus.get(u.key.id) || 0;
 			const status = u.update?.status;
 			if (status !== undefined) {
-				logStatus(u.key, status, prev);
+				logStatus(u.key.id, status, prev);
 				this.lastStatus.set(u.key.id, status);
 			}
 		}
@@ -140,20 +145,29 @@ export class WhatsAppBot {
 		if (upsert.type !== "notify" || !this.sock) return;
 
 		for (const msg of upsert.messages) {
+			const to = msg.key.remoteJid.split("@")[0];
 			if (msg.key.fromMe) continue;
 			if (isJidNewsletter(msg.key.remoteJid!)) continue;
 
-			logStatus(msg.key, 0, 0);
+			console.log("🔔 Nuevo mensaje de", msg.key.remoteJid);
+			logStatus(msg.key.id, 0);
 			downloadMedia(msg);
 
-			console.log("🔔 Nuevo mensaje de", msg.key.remoteJid);
-
 			await this.sock.readMessages([msg.key]);
-			await sendMessage(this.sock, msg.key, msg.key.remoteJid!, "media", "video", {
-				url: "./public/DSC0603-1.webp",
-				caption: "holisss",
-				quoted: { key: msg.key, message: msg.message },
-			});
+			const newId = await sendMessage(
+				this.from,
+				to,
+				"media",
+				"video",
+				{
+					url: "./public/VID-20250513-WA0026.mp4",
+					caption: "holisss",
+					quoted: { key: msg.key, message: msg.message },
+				},
+				msg.key.id
+			);
+
+			//*actualizar todos los id con el newId
 		}
 	}
 
@@ -174,7 +188,7 @@ export class WhatsAppBot {
 // Inicializar bots
 const configs: NumberConfig[] = [
 	{ number: "573144864063", authFolder: "baileys_auth_info_2" },
-	{ number: "573022949109", authFolder: "baileys_auth_info_1" },
+	// { number: "573022949109", authFolder: "baileys_auth_info_1" },
 ];
 
 configs.forEach((cfg) => {

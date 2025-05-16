@@ -12,64 +12,75 @@ import { logStatus } from "../../wsp";
 
 export const mediaHandlers: Record<
 	string,
-	(sock: WASocket, msgKey: proto.IMessageKey, jid: string, payload: MediaPayload) => Promise<void>
+	(sock: WASocket, msgId: string, jid: string, payload: MediaPayload) => Promise<string>
 > = {
-	voiceNote: async (sock, msgKey, jid, { url, quoted }) => {
+	voiceNote: async (sock, msgId, jid, { url, quoted }) => {
 		if (await audioDurationValidator(url)) {
-			logStatus(msgKey, 1);
-			await sock.sendMessage(jid, { audio: { url }, ptt: true }, { quoted });
-			logStatus(msgKey, 2);
+			logStatus(msgId, 1);
+			const msg = await sock.sendMessage(jid, { audio: { url }, ptt: true }, { quoted });
+			logStatus(msgId, 2);
+			return msg?.key.id ?? "";
 		} else {
-			logStatus(msgKey, 6);
+			logStatus(msgId, 6);
+			return "";
 		}
 	},
 
-	audio: async (sock, msgKey, jid, { url, quoted }) => {
+	audio: async (sock, msgId, jid, { url, quoted }) => {
 		if (await audioDurationValidator(url)) {
-			logStatus(msgKey, 1);
-			await sock.sendMessage(jid, { audio: { url } }, { quoted });
-			logStatus(msgKey, 2);
+			logStatus(msgId, 1);
+			const msg = await sock.sendMessage(jid, { audio: { url } }, { quoted });
+			logStatus(msgId, 2);
+			return msg?.key.id ?? "";
 		} else {
-			logStatus(msgKey, 6);
+			logStatus(msgId, 6);
+			return "";
 		}
 	},
 
-	video: async (sock, msgKey, jid, { url, caption, quoted }) => {
+	video: async (sock, msgId, jid, { url, caption, quoted }) => {
 		if (size16MbValidator(url)) {
-			logStatus(msgKey, 1);
-			await sock.sendMessage(jid, { video: { url }, caption }, { quoted });
-			logStatus(msgKey, 2);
+			logStatus(msgId, 1);
+			console.log(msgId);
+			const msg = await sock.sendMessage(jid, { video: { url }, caption }, { quoted });
+			logStatus(msgId, 2);
+			return msg?.key.id ?? "";
 		} else {
-			logStatus(msgKey, 6);
+			logStatus(msgId, 6);
+			return "";
 		}
 	},
 
-	image: async (sock, msgKey, jid, { url, caption, quoted }) => {
+	image: async (sock, msgId, jid, { url, caption, quoted }) => {
 		if (size16MbValidator(url)) {
-			logStatus(msgKey, 1);
-			await sock.sendMessage(jid, { image: { url }, caption }, { quoted });
-			logStatus(msgKey, 2);
+			logStatus(msgId, 1);
+			const msg = await sock.sendMessage(jid, { image: { url }, caption }, { quoted });
+			logStatus(msgId, 2);
+			return msg?.key.id ?? "";
 		} else {
-			logStatus(msgKey, 6);
+			logStatus(msgId, 6);
+			return "";
 		}
 	},
 
-	sticker: async (sock, msgKey, jid, { url, quoted }) => {
+	sticker: async (sock, msgId, jid, { url, quoted }) => {
 		if (size16MbValidator(url)) {
-			logStatus(msgKey, 1);
-			await sock.sendMessage(jid, { sticker: { url } }, { quoted });
-			logStatus(msgKey, 2);
+			logStatus(msgId, 1);
+			const msg = await sock.sendMessage(jid, { sticker: { url } }, { quoted });
+			logStatus(msgId, 2);
+			return msg?.key.id ?? "";
 		} else {
-			logStatus(msgKey, 6);
+			logStatus(msgId, 6);
+			return "";
 		}
 	},
 
-	document: async (sock, msgKey, jid, { url, caption, quoted }) => {
+	document: async (sock, msgId, jid, { url, caption, quoted }) => {
 		if (size2GbValidator(url)) {
-			logStatus(msgKey, 1);
+			logStatus(msgId, 1);
 			const fileName = path.basename(url);
 			const mimetype = lookup(url) || "application/octet-stream";
-			await sock.sendMessage(
+			const msg = await sock.sendMessage(
 				jid,
 				{
 					document: { url },
@@ -79,9 +90,11 @@ export const mediaHandlers: Record<
 				},
 				{ quoted }
 			);
-			logStatus(msgKey, 2);
+			logStatus(msgId, 2);
+			return msg?.key.id ?? "";
 		} else {
-			logStatus(msgKey, 6);
+			logStatus(msgId, 6);
+			return "";
 		}
 	},
 };
