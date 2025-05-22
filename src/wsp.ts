@@ -14,6 +14,17 @@ import { sendMessage } from "./messages/sendMessage";
 import { downloadMedia } from "./messages/downloadMessage";
 import fs from "fs/promises";
 import { addSocket } from "./socketManager";
+
+import { usePostgreSQLAuthState, initAuthCreds } from "./postgresAuth";
+
+// Configuración de conexión a PostgreSQL para postgres-baileys
+const postgreSQLConfig = {
+	host: "localhost",
+	port: 5432,
+	user: "postgres",
+	password: "root",
+	database: "pruebaNest",
+};
 /**
  * Función global exportada para loguear estados de mensajes.
  */
@@ -56,17 +67,17 @@ export class WhatsAppBot {
 
 	public async start() {
 		const { number, authFolder } = this.config;
-		const { state, saveCreds } = await useMultiFileAuthState(authFolder);
+		const { state, saveCreds } = await usePostgreSQLAuthState(
+			postgreSQLConfig,
+			"your-unique-session-id"
+		);
 		const { version } = await fetchLatestBaileysVersion();
 		this.sock = makeWASocket({
 			version,
 			logger: this.logger,
 			printQRInTerminal: true,
 			msgRetryCounterCache: this.retryCache,
-			auth: {
-				creds: state.creds,
-				keys: makeCacheableSignalKeyStore(state.keys, this.logger),
-			},
+			auth: state,
 			browser: Browsers.ubuntu(`MultiBot_${number}`),
 			generateHighQualityLinkPreview: true,
 		});
@@ -91,7 +102,9 @@ export class WhatsAppBot {
 			this.onConnectionUpdate(connection ?? "", lastDisconnect)
 		);
 
-		this.sock.ev.on("messages.update", (updates) => this.onMessageAckUpdates(updates));
+		this.sock.ev.on("messages.update", (updates) => {
+			this.onMessageAckUpdates(updates);
+		});
 
 		this.sock.ev.on("messages.upsert", async (upsert) => this.onIncomingMessages(upsert));
 	}
@@ -153,6 +166,7 @@ export class WhatsAppBot {
 			logStatus(msg.key.id, 0);
 			downloadMedia(msg);
 
+			console.log(JSON.stringify(msg, null, 2));
 			await this.sock.readMessages([msg.key]);
 			const newId = await sendMessage(
 				this.from,
@@ -166,7 +180,7 @@ export class WhatsAppBot {
 				},
 				msg.key.id
 			);
-
+			console.log(newId);
 			//*actualizar todos los id con el newId
 		}
 	}
@@ -187,7 +201,7 @@ export class WhatsAppBot {
 
 // Inicializar bots
 const configs: NumberConfig[] = [
-	{ number: "573144864063", authFolder: "baileys_auth_info_2" },
+	{ number: "573229781433", authFolder: "baileys_auth_info_2" },
 	// { number: "573022949109", authFolder: "baileys_auth_info_1" },
 ];
 

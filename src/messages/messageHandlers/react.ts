@@ -7,6 +7,7 @@ export const reactHandlers: Record<
 > = {
 	react: async (sock, msgId, jid, { key, emoji }) => {
 		const msg = await sock.sendMessage(jid, { react: { key: key, text: emoji } });
+		// console.log(JSON.stringify(msg));
 		return msg?.key.id ?? "";
 	},
 };
